@@ -1,0 +1,1198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Career Guidance System</title>
+    <!-- Tailwind CSS CDN for utility classes -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <style>
+        /* Basic body styling */
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(to bottom right, #f0f4f8, #e0e9f0);
+            color: #333;
+        }
+        /* Custom styles for pre-wrap behavior in prose-like content */
+        .prose-like {
+            white-space: pre-wrap;
+            word-wrap: break-word; /* Ensures long words break and don't overflow */
+        }
+        /* Modal backdrop */
+        .modal-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        /* Modal content */
+        .modal-content {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 0.75rem; /* rounded-xl */
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); /* shadow-2xl */
+            max-width: 48rem; /* max-w-2xl for history, max-w-md for others */
+            max-height: 90vh;
+            overflow-y: auto;
+            position: relative;
+            border: 1px solid #e2e8f0; /* border border-gray-200 */
+        }
+        /* Chat specific styles */
+        .chat-container {
+            height: 400px; /* Fixed height for chat display */
+            overflow-y: auto;
+            border: 1px solid #e2e8f0;
+            border-radius: 0.75rem;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            background-color: #f8fafc; /* bg-slate-50 */
+        }
+        .chat-message {
+            margin-bottom: 0.75rem;
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.5rem;
+            max-width: 80%;
+        }
+        .chat-message.user {
+            background-color: #e0e7ff; /* bg-indigo-100 */
+            align-self: flex-end;
+            margin-left: auto;
+        }
+        .chat-message.ai {
+            background-color: #e2e8f0; /* bg-gray-200 */
+            align-self: flex-start;
+            margin-right: auto;
+            font-size: 1.05rem; /* Increased font size for AI responses */
+        }
+    </style>
+</head>
+<body>
+    <div id="app-root" class="w-full flex justify-center items-center p-4">
+        <!-- The application UI will be rendered here by JavaScript -->
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, collection, query, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase Configuration (from your previous input)
+        const firebaseConfig = {
+            apiKey: "AIzaSyCGsgL070qfh0KqwoFZLjQ3_hrYcBYxeI8",
+            authDomain: "ai-career-guide-8af0f.firebaseapp.com",
+            projectId: "ai-career-guide-8af0f",
+            storageBucket: "ai-career-guide-8af0f.firebasestorage.app",
+            messagingSenderId: "977509307025",
+            appId: "1:977509307025:web:834e268e4ef1d36c2ca530",
+            measurementId: "G-189P4BG2VX"
+        };
+
+        let app;
+        let auth;
+        let db;
+        let currentUser = null;
+        let currentUserId = null;
+        let currentProjectId = null;
+        let isAuthInitialized = false; // Flag to track Firebase initialization
+
+        // Get the root element to render the app
+        const appRoot = document.getElementById('app-root');
+
+        // State variables for the UI (managed manually, no React hooks)
+        let currentView = 'loading'; // 'loading', 'login', 'register', 'main'
+        let email = '';
+        let password = '';
+        let authError = '';
+        let isLoading = false; // Global loading state for buttons/actions
+
+        // Conversational state
+        let conversationHistory = []; // Stores { role: 'user' | 'model', text: string }
+        let currentQuestionType = 'initial'; // 'initial', 'interests', 'skills', 'goals', 'finished_questions'
+        let userResponses = {
+            interests: '',
+            skills: '',
+            goals: ''
+        };
+        let currentUserInput = ''; // For the chat input field
+
+        let careerGuidance = '';
+        let guidanceError = '';
+        let pastGuidance = [];
+        let showPastGuidanceModal = false;
+        let showDeleteConfirmModal = false;
+        let guidanceToDelete = null;
+
+        let skillPlan = '';
+        let isSkillPlanLoading = false;
+        let skillPlanError = '';
+        let showForgotPasswordModal = false;
+        let forgotPasswordEmail = '';
+        let forgotPasswordMessage = '';
+
+        // --- UI Rendering Function ---
+        function renderUI() {
+            console.log("renderUI called, currentView:", currentView);
+            appRoot.innerHTML = ''; // Clear previous UI
+            let htmlContent = '';
+
+            if (currentView === 'loading') {
+                htmlContent = `
+                    <div class="min-h-screen bg-gradient-to-br from-purple-100 to-indigo-200 flex items-center justify-center p-4 font-sans w-full">
+                        <div class="text-center text-indigo-800 text-2xl font-bold flex items-center">
+                            <svg class="animate-spin h-8 w-8 mr-3 text-indigo-600" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Loading application...
+                        </div>
+                    </div>
+                `;
+            } else if (currentView === 'login' || currentView === 'register') {
+                htmlContent = `
+                    <div class="min-h-screen bg-gradient-to-br from-purple-100 to-indigo-200 flex flex-col items-center justify-center p-4 font-sans w-full">
+                        <h2 class="text-3xl sm:text-4xl lg:text-4xl font-extrabold text-center text-indigo-800 whitespace-nowrap mb-8">
+                            AI Career Guidance System
+                        </h2>
+                        <div class="bg-white rounded-xl shadow-2xl p-8 w-full max-w-md border border-gray-200">
+                            <h1 class="text-4xl font-extrabold text-center text-indigo-800 mb-8">
+                                ${currentView === 'login' ? 'Login' : 'Register'}
+                            </h1>
+                            <form id="authForm" class="space-y-6">
+                                <div>
+                                    <label for="email" class="block text-lg font-semibold text-gray-700 mb-2">
+                                        Email:
+                                    </label>
+                                    <input
+                                        type="email"
+                                        id="email"
+                                        class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition duration-200 ease-in-out"
+                                        placeholder="your.email@example.com"
+                                        value="${email}"
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label for="password" class="block text-lg font-semibold text-gray-700 mb-2">
+                                        Password:
+                                    </label>
+                                    <input
+                                        type="password"
+                                        id="password"
+                                        class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition duration-200 ease-in-out"
+                                        placeholder="••••••••"
+                                        value="${password}"
+                                        required
+                                    />
+                                </div>
+                                ${authError ? `
+                                    <div class="p-3 rounded-lg text-sm ${authError.includes('successful') ? 'bg-green-100 border border-green-400 text-green-700' : 'bg-red-100 border border-red-400 text-red-700'}">
+                                        ${authError}
+                                    </div>
+                                ` : ''}
+                                <button
+                                    type="submit"
+                                    class="w-full bg-indigo-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-500 focus:ring-opacity-50 transition duration-300 ease-in-out transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}"
+                                    ${isLoading ? 'disabled' : ''}
+                                >
+                                    ${isLoading ? `
+                                        <svg class="animate-spin h-5 w-5 mr-3 text-white" viewBox="0 0 24 24">
+                                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                    ` : (currentView === 'login' ? 'Login' : 'Register')}
+                                </button>
+                            </form>
+                            <div class="mt-6 text-center">
+                                ${currentView === 'login' ? `
+                                    <p class="text-gray-600">
+                                        Don't have an account?
+                                        <button id="switchToRegister" class="text-indigo-600 hover:text-indigo-800 font-semibold focus:outline-none">
+                                            Register here
+                                        </button>
+                                    </p>
+                                    <button id="forgotPasswordBtn" class="text-sm text-indigo-600 hover:text-indigo-800 font-semibold focus:outline-none mt-2 block mx-auto w-auto">
+                                        Forgot Password?
+                                    </button>
+                                ` : `
+                                    <p class="text-gray-600">
+                                        Already have an account?
+                                        <button id="switchToLogin" class="text-indigo-600 hover:text-indigo-800 font-semibold focus:outline-none">
+                                            Login here
+                                        </button>
+                                    </p>
+                                `}
+                            </div>
+                        </div>
+                        ${showForgotPasswordModal ? `
+                            <div class="modal-backdrop">
+                                <div class="modal-content w-full max-w-md">
+                                    <h3 class="text-2xl font-bold text-indigo-800 mb-4">Reset Password</h3>
+                                    <button id="closeForgotPasswordModal" class="absolute top-4 right-4 text-gray-500 hover:text-gray-800 text-2xl font-bold w-auto">
+                                        &times;
+                                    </button>
+                                    <p class="text-gray-700 mb-4">Enter your email address to receive a password reset link.</p>
+                                    <input
+                                        type="email"
+                                        id="forgotPasswordEmailInput"
+                                        placeholder="your.email@example.com"
+                                        class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition duration-200 ease-in-out mb-4"
+                                        value="${forgotPasswordEmail}"
+                                        required
+                                    />
+                                    ${forgotPasswordMessage ? `
+                                        <div class="p-3 rounded-lg text-sm mb-4 ${forgotPasswordMessage.type === 'success' ? 'bg-green-100 border border-green-400 text-green-700' : 'bg-red-100 border border-red-400 text-red-700'}">
+                                            ${forgotPasswordMessage.text}
+                                        </div>
+                                    ` : ''}
+                                    <button
+                                        id="sendResetEmailBtn"
+                                        class="w-full bg-indigo-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-500 focus:ring-opacity-50 transition duration-300 ease-in-out transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}"
+                                        ${isLoading ? 'disabled' : ''}
+                                    >
+                                        ${isLoading ? `
+                                            <svg class="animate-spin h-5 w-5 mr-3 text-white" viewBox="0 0 24 24">
+                                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                    ` : 'Send Reset Email'}
+                                    </button>
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            } else if (currentView === 'main') {
+                htmlContent = `
+                    <div class="min-h-screen bg-gradient-to-br from-purple-100 to-indigo-200 flex flex-col items-center justify-center p-4 font-sans w-full">
+                        <div class="bg-white rounded-xl shadow-2xl p-8 w-full max-w-3xl border border-gray-200 mb-4">
+                            <div class="flex justify-between items-center mb-6">
+                                <h1 class="text-4xl font-extrabold text-indigo-800">
+                                    AI Career Guidance
+                                </h1>
+                                <div class="flex items-center space-x-4">
+                                    ${currentUser && currentUser.email ? `
+                                        <span class="text-gray-700 text-md font-medium">
+                                            Welcome, ${currentUser.email.split('@')[0]}!
+                                        </span>
+                                    ` : ''}
+                                    ${currentUserId ? `
+                                        <span class="text-gray-500 text-sm">
+                                            User ID: ${currentUserId.substring(0, 8)}...
+                                        </span>
+                                    ` : ''}
+                                    <button
+                                        id="logoutBtn"
+                                        class="bg-red-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-red-600 focus:outline-none focus:ring-4 focus:ring-red-300 transition duration-300 ease-in-out ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}"
+                                        ${isLoading ? 'disabled' : ''}
+                                    >
+                                        Logout
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Chat Interface -->
+                            <div class="chat-container flex flex-col space-y-3">
+                                ${conversationHistory.map(msg => `
+                                    <div class="chat-message ${msg.role === 'user' ? 'user' : 'ai'}">
+                                        <p class="text-sm">${msg.text}</p>
+                                    </div>
+                                `).join('')}
+                                ${isLoading ? `
+                                    <div class="chat-message ai">
+                                        <p class="text-sm flex items-center">
+                                            <svg class="animate-spin h-4 w-4 mr-2 text-indigo-600" viewBox="0 0 24 24">
+                                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                            </svg>
+                                            AI is typing...
+                                        </p>
+                                    </div>
+                                ` : ''}
+                            </div>
+
+                            <div class="flex mt-4 space-x-2">
+                                <textarea
+                                    id="chatInput"
+                                    class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition duration-200 ease-in-out resize-none min-h-[48px] max-h-[120px]"
+                                    placeholder="Type your response here..."
+                                    rows="1"
+                                    value="${currentUserInput}"
+                                ></textarea>
+                                <button
+                                    id="sendMessageBtn"
+                                    class="bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-500 focus:ring-opacity-50 transition duration-300 ease-in-out transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    ${isLoading ? 'disabled' : ''}
+                                >
+                                    Send
+                                </button>
+                            </div>
+
+                            ${guidanceError ? `
+                                <div class="mt-8 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg">
+                                    <p class="font-semibold">Error:</p>
+                                    <p>${guidanceError}</p>
+                                </div>
+                            ` : ''}
+
+                            ${careerGuidance ? `
+                                <div class="mt-8 p-6 bg-blue-50 border border-blue-200 rounded-xl shadow-inner">
+                                    <h2 class="text-2xl font-bold text-blue-800 mb-4">Your Career Guidance:</h2>
+                                    <div class="prose-like text-gray-800 leading-relaxed">
+                                        ${careerGuidance}
+                                    </div>
+                                    <button
+                                        id="getSkillPlanBtn"
+                                        class="w-full bg-purple-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-purple-700 focus:outline-none focus:ring-4 focus:ring-purple-500 focus:ring-opacity-50 transition duration-300 ease-in-out transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center mt-4 ${isSkillPlanLoading ? 'opacity-50 cursor-not-allowed' : ''}"
+                                        ${isSkillPlanLoading ? 'disabled' : ''}
+                                    >
+                                        ${isSkillPlanLoading ? `
+                                            <svg class="animate-spin h-5 w-5 mr-3 text-white" viewBox="0 0 24 24">
+                                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                    ` : '✨ Generate Skill Development Plan'}
+                                    </button>
+                                </div>
+                            ` : ''}
+
+                            ${skillPlanError ? `
+                                <div class="mt-8 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg">
+                                    <p class="font-semibold">Error:</p>
+                                    <p>${skillPlanError}</p>
+                                </div>
+                            ` : ''}
+
+                            ${skillPlan ? `
+                                <div class="mt-8 p-6 bg-purple-50 border border-purple-200 rounded-xl shadow-inner">
+                                    <h2 class="text-2xl font-bold text-purple-800 mb-4">Your Skill Development Plan:</h2>
+                                    <div class="prose-like text-gray-800 leading-relaxed">
+                                        ${skillPlan}
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+
+                        <!-- Past Guidance Section -->
+                        <div class="w-full max-w-3xl bg-white rounded-xl shadow-2xl p-8 border border-gray-200">
+                            <div class="flex justify-between items-center mb-4">
+                                <h2 class="text-2xl font-bold text-indigo-800">Past Guidance</h2>
+                                <div class="flex space-x-2">
+                                    <button
+                                        id="viewHistoryBtn"
+                                        class="bg-blue-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-4 focus:ring-blue-300 transition duration-300 ease-in-out"
+                                    >
+                                        View History
+                                    </button>
+                                    <button
+                                        id="restartConversationBtn"
+                                        class="bg-green-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-green-600 focus:outline-none focus:ring-4 focus:ring-green-300 transition duration-300 ease-in-out"
+                                    >
+                                        Restart Conversation
+                                    </button>
+                                </div>
+                            </div>
+                            ${pastGuidance.length === 0 ? `
+                                <p class="text-gray-600">No past guidance found. Generate some above!</p>
+                            ` : `
+                                <ul class="space-y-3">
+                                    ${pastGuidance.slice(0, 3).map(item => `
+                                        <li class="bg-gray-50 p-3 rounded-lg border border-gray-200 flex justify-between items-center">
+                                            <p class="text-gray-700 text-sm font-medium">
+                                                ${new Date(item.timestamp).toLocaleString()}: ${item.interests.substring(0, 50)}${item.interests.length > 50 ? '...' : ''}
+                                            </p>
+                                            <button
+                                                data-id="${item.id}"
+                                                class="load-guidance-btn text-indigo-600 hover:text-indigo-800 text-sm font-semibold"
+                                            >
+                                                Load
+                                            </button>
+                                        </li>
+                                    `).join('')}
+                                </ul>
+                            `}
+                        </div>
+
+                        <!-- Past Guidance Modal -->
+                        ${showPastGuidanceModal ? `
+                            <div class="modal-backdrop">
+                                <div class="modal-content w-full max-w-2xl">
+                                    <h2 class="text-3xl font-bold text-indigo-800 mb-6 text-center">Your Guidance History</h2>
+                                    <button id="closePastGuidanceModal" class="absolute top-4 right-4 text-gray-500 hover:text-gray-800 text-2xl font-bold w-auto">
+                                        &times;
+                                    </button>
+                                    ${pastGuidance.length === 0 ? `
+                                        <p class="text-gray-600 text-center">No past guidance found. Generate some above!</p>
+                                    ` : `
+                                        <ul class="space-y-4">
+                                            ${pastGuidance.map(item => `
+                                                <li class="bg-gray-50 p-4 rounded-lg border border-gray-200 shadow-sm">
+                                                    <div class="flex justify-between items-start mb-2">
+                                                        <p class="text-sm text-gray-500">
+                                                            ${new Date(item.timestamp).toLocaleString()}
+                                                        </p>
+                                                        <div class="flex space-x-2">
+                                                            <button
+                                                                data-id="${item.id}"
+                                                                class="load-guidance-btn-modal bg-indigo-500 text-white text-sm py-1 px-3 rounded-md hover:bg-indigo-600 transition duration-200"
+                                                            >
+                                                                Load
+                                                            </button>
+                                                            <button
+                                                                data-id="${item.id}"
+                                                                class="delete-guidance-btn bg-red-500 text-white text-sm py-1 px-3 rounded-md hover:bg-red-600 transition duration-200"
+                                                            >
+                                                                Delete
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    <p class="text-gray-800 font-semibold mb-2">
+                                                        Interests: <span class="font-normal">${item.interests.substring(0, 100)}${item.interests.length > 100 ? '...' : ''}</span>
+                                                    </p>
+                                                    <p class="text-gray-800 font-semibold">
+                                                        Skills: <span class="font-normal">${item.skills.substring(0, 100)}${item.skills.length > 100 ? '...' : ''}</span>
+                                                    </p>
+                                                    <div class="mt-3 text-gray-700 text-sm prose-like">
+                                                        ${item.guidance.substring(0, 200)}${item.guidance.length > 200 ? '...' : ''}
+                                                    </div>
+                                                </li>
+                                            `).join('')}
+                                        </ul>
+                                    `}
+                                </div>
+                            </div>
+                        ` : ''}
+
+                        <!-- Delete Confirmation Modal -->
+                        ${showDeleteConfirmModal && guidanceToDelete ? `
+                            <div class="modal-backdrop">
+                                <div class="modal-content w-full max-w-md">
+                                    <h3 class="text-2xl font-bold text-red-700 mb-4">Confirm Deletion</h3>
+                                    <p class="text-gray-700 mb-6">
+                                        Are you sure you want to delete this guidance entry from
+                                        <span class="font-semibold">${new Date(guidanceToDelete.timestamp).toLocaleString()}</span>?
+                                        This action cannot be undone.
+                                    </p>
+                                    <div class="flex justify-end space-x-4">
+                                        <button
+                                            id="cancelDeleteBtn"
+                                            class="bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg hover:bg-gray-400 transition duration-200"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            id="confirmDeleteBtn"
+                                            class="bg-red-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-red-700 transition duration-200"
+                                        >
+                                            Delete
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }
+            appRoot.innerHTML = htmlContent;
+            // Use setTimeout to ensure DOM elements are rendered before attaching listeners
+            setTimeout(attachEventListeners, 0);
+            // Scroll chat to bottom if it's the main view
+            if (currentView === 'main') {
+                const chatContainer = document.querySelector('.chat-container');
+                if (chatContainer) {
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                }
+            }
+        }
+
+        // --- Event Listener Attachment ---
+        function attachEventListeners() {
+            console.log("Attaching event listeners. (Delayed)");
+            try {
+                // Attach listeners based on the current view
+                if (currentView === 'login' || currentView === 'register') {
+                    // Auth Form elements
+                    const authForm = document.getElementById('authForm');
+                    if (authForm) {
+                        console.log("Auth form found, attaching submit listener.");
+                        authForm.onsubmit = async (e) => {
+                            e.preventDefault();
+                            email = document.getElementById('email').value;
+                            password = document.getElementById('password').value;
+                            if (currentView === 'login') {
+                                await handleLogin();
+                            } else {
+                                await handleRegister();
+                            }
+                        };
+                        const emailInput = document.getElementById('email');
+                        const passwordInput = document.getElementById('password');
+                        if (emailInput) emailInput.oninput = (e) => { email = e.target.value; };
+                        if (passwordInput) passwordInput.oninput = (e) => { password = e.target.value; };
+                    }
+
+                    const switchToRegisterBtn = document.getElementById('switchToRegister');
+                    if (switchToRegisterBtn) {
+                        switchToRegisterBtn.onclick = () => {
+                            currentView = 'register';
+                            authError = '';
+                            renderUI();
+                        };
+                    }
+                    const switchToLoginBtn = document.getElementById('switchToLogin');
+                    if (switchToLoginBtn) {
+                        switchToLoginBtn.onclick = () => {
+                            currentView = 'login';
+                            authError = '';
+                            renderUI();
+                        };
+                    }
+
+                    const forgotPasswordBtn = document.getElementById('forgotPasswordBtn');
+                    if (forgotPasswordBtn) {
+                        forgotPasswordBtn.onclick = () => {
+                            showForgotPasswordModal = true;
+                            forgotPasswordEmail = email; // Pre-fill with current email
+                            forgotPasswordMessage = '';
+                            renderUI();
+                        };
+                    }
+
+                    const closeForgotPasswordModalBtn = document.getElementById('closeForgotPasswordModal');
+                    if (closeForgotPasswordModalBtn) {
+                        closeForgotPasswordModalBtn.onclick = () => {
+                            showForgotPasswordModal = false;
+                            forgotPasswordMessage = '';
+                            forgotPasswordEmail = '';
+                            renderUI();
+                        };
+                    }
+
+                    const forgotPasswordEmailInput = document.getElementById('forgotPasswordEmailInput');
+                    if (forgotPasswordEmailInput) {
+                        forgotPasswordEmailInput.oninput = (e) => { forgotPasswordEmail = e.target.value; };
+                    }
+
+                    const sendResetEmailBtn = document.getElementById('sendResetEmailBtn');
+                    if (sendResetEmailBtn) {
+                        sendResetEmailBtn.onclick = handleForgotPassword;
+                    }
+                } else if (currentView === 'main') {
+                    // Main App UI elements
+                    const logoutBtn = document.getElementById('logoutBtn');
+                    if (logoutBtn) {
+                        logoutBtn.onclick = handleLogout;
+                    }
+
+                    const chatInput = document.getElementById('chatInput');
+                    const sendMessageBtn = document.getElementById('sendMessageBtn');
+
+                    if (chatInput) {
+                        chatInput.value = currentUserInput; // Ensure input field reflects state
+                        chatInput.oninput = (e) => { currentUserInput = e.target.value; };
+                        chatInput.onkeydown = (e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault(); // Prevent newline in textarea
+                                if (currentUserInput.trim() !== '' && !isLoading) {
+                                    handleSendMessage();
+                                }
+                            }
+                        };
+                    }
+                    if (sendMessageBtn) {
+                        sendMessageBtn.onclick = () => {
+                            if (currentUserInput.trim() !== '' && !isLoading) {
+                                handleSendMessage();
+                            }
+                        };
+                    }
+
+                    const getSkillPlanBtn = document.getElementById('getSkillPlanBtn');
+                    if (getSkillPlanBtn) {
+                        getSkillPlanBtn.onclick = handleGetSkillPlan;
+                    }
+
+                    const viewHistoryBtn = document.getElementById('viewHistoryBtn');
+                    if (viewHistoryBtn) {
+                        viewHistoryBtn.onclick = () => {
+                            showPastGuidanceModal = true;
+                            renderUI();
+                        };
+                    }
+
+                    const closePastGuidanceModalBtn = document.getElementById('closePastGuidanceModal');
+                    if (closePastGuidanceModalBtn) {
+                        closePastGuidanceModalBtn.onclick = () => {
+                            showPastGuidanceModal = false;
+                            renderUI();
+                        };
+                    }
+
+                    const restartConversationBtn = document.getElementById('restartConversationBtn');
+                    if (restartConversationBtn) {
+                        restartConversationBtn.onclick = restartConversation;
+                    }
+
+                    // Load buttons in main view
+                    document.querySelectorAll('.load-guidance-btn').forEach(button => {
+                        button.onclick = (e) => {
+                            const idToLoad = e.target.dataset.id;
+                            const item = pastGuidance.find(g => g.id === idToLoad);
+                            if (item) {
+                                // Reset conversation when loading past guidance
+                                conversationHistory = [];
+                                currentQuestionType = 'finished_questions'; // Indicate no more questions to ask
+                                userResponses = {
+                                    interests: item.interests,
+                                    skills: item.skills,
+                                    goals: item.goals
+                                };
+                                careerGuidance = item.guidance;
+                                skillPlan = ''; // Clear skill plan when loading new guidance
+                                skillPlanError = '';
+                                conversationHistory.push({ role: 'model', text: `Loaded past guidance from ${new Date(item.timestamp).toLocaleString()}.` });
+                                conversationHistory.push({ role: 'model', text: `Here's the guidance based on your interests: "${item.interests}", skills: "${item.skills}", and goals: "${item.goals}".` });
+                                renderUI();
+                            }
+                        };
+                    });
+
+                    // Load buttons in modal
+                    document.querySelectorAll('.load-guidance-btn-modal').forEach(button => {
+                        button.onclick = (e) => {
+                            const idToLoad = e.target.dataset.id;
+                            const item = pastGuidance.find(g => g.id === idToLoad);
+                            if (item) {
+                                // Reset conversation when loading past guidance
+                                conversationHistory = [];
+                                currentQuestionType = 'finished_questions'; // Indicate no more questions to ask
+                                userResponses = {
+                                    interests: item.interests,
+                                    skills: item.skills,
+                                    goals: item.goals
+                                };
+                                careerGuidance = item.guidance;
+                                skillPlan = ''; // Clear skill plan when loading new guidance
+                                skillPlanError = '';
+                                showPastGuidanceModal = false; // Close modal after loading
+                                conversationHistory.push({ role: 'model', text: `Loaded past guidance from ${new Date(item.timestamp).toLocaleString()}.` });
+                                conversationHistory.push({ role: 'model', text: `Here's the guidance based on your interests: "${item.interests}", skills: "${item.skills}", and goals: "${item.goals}".` });
+                                renderUI();
+                            }
+                        };
+                    });
+
+                    // Delete buttons in modal
+                    document.querySelectorAll('.delete-guidance-btn').forEach(button => {
+                        button.onclick = (e) => {
+                            const idToDelete = e.target.dataset.id;
+                            guidanceToDelete = pastGuidance.find(g => g.id === idToDelete);
+                            showDeleteConfirmModal = true;
+                            renderUI();
+                        };
+                    });
+
+                    const cancelDeleteBtn = document.getElementById('cancelDeleteBtn');
+                    if (cancelDeleteBtn) {
+                        cancelDeleteBtn.onclick = () => {
+                            showDeleteConfirmModal = false;
+                            guidanceToDelete = null;
+                            renderUI();
+                        };
+                    }
+
+                    const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
+                    if (confirmDeleteBtn) {
+                        confirmDeleteBtn.onclick = async () => {
+                            if (guidanceToDelete) {
+                                await handleDeleteGuidance(guidanceToDelete.id);
+                            }
+                        };
+                    }
+                }
+            } catch (error) {
+                console.error("Error attaching event listeners:", error);
+            }
+        }
+
+        // --- Firebase Initialization ---
+        function initializeFirebase() {
+            console.log("Initializing Firebase...");
+            try {
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+                currentProjectId = firebaseConfig.projectId;
+
+                onAuthStateChanged(auth, async (user) => {
+                    currentUser = user;
+                    if (currentUser) {
+                        currentUserId = currentUser.uid;
+                        currentView = 'main';
+                        console.log("User authenticated, setting main app view.");
+                        await fetchPastGuidance(); // Fetch data after auth
+                        startConversation(); // Start the AI conversation
+                    } else {
+                        currentView = 'login';
+                        currentUserId = null;
+                        pastGuidance = []; // Clear past guidance on logout
+                        careerGuidance = ''; // Clear current guidance
+                        skillPlan = ''; // Clear skill plan
+                        conversationHistory = []; // Clear conversation history
+                        userResponses = { interests: '', skills: '', goals: '' }; // Reset user responses
+                        currentQuestionType = 'initial'; // Reset question type
+                        currentUserInput = ''; // Reset input
+                        console.log("No user authenticated, setting auth view to login.");
+                    }
+                    isAuthInitialized = true;
+                    renderUI(); // Initial render after auth state is known
+                });
+            } catch (err) {
+                console.error("Firebase initialization error:", err);
+                let userMessage = `Failed to initialize the application: ${err.message}. Please try again later.`;
+                if (err.message.includes("Firebase configuration is missing or empty")) {
+                    userMessage = "Application setup incomplete: Firebase configuration is missing. Please ensure your Canvas environment provides the Firebase config.";
+                } else if (err.message.includes("Invalid Firebase configuration provided")) {
+                    userMessage = "Application setup incomplete: Invalid Firebase configuration. Please check the format of the provided config.";
+                }
+                authError = userMessage;
+                currentView = 'login';
+                isAuthInitialized = true;
+                renderUI();
+            }
+        }
+
+        // --- Authentication Functions ---
+        async function handleLogin() {
+            authError = '';
+            isLoading = true;
+            renderUI(); // Show loading state
+            try {
+                await signInWithEmailAndPassword(auth, email, password);
+                console.log("Login successful.");
+                // onAuthStateChanged will handle view change
+            } catch (error) {
+                console.error("Login error:", error);
+                let errorMessage = error.message;
+                if (error.code === 'auth/invalid-email') {
+                    errorMessage = 'Invalid email address format.';
+                } else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+                    errorMessage = 'Incorrect email or password. Please check your credentials.';
+                } else if (error.code === 'auth/email-already-in-use') {
+                    errorMessage = 'This email is already registered. Please login or use a different email.';
+                } else if (error.code === 'auth/weak-password') {
+                    errorMessage = 'Password is too weak. Please choose a stronger password (at least 6 characters).';
+                } else if (error.code === 'auth/network-request-failed') {
+                    errorMessage = 'Network error. Please check your internet connection.';
+                } else if (error.code === 'auth/operation-not-allowed') {
+                    errorMessage = 'Email/Password authentication is not enabled for this Firebase project. Please enable it in Firebase Console.';
+                } else {
+                    errorMessage = `Authentication failed: ${error.message}`;
+                }
+                authError = errorMessage;
+            } finally {
+                isLoading = false;
+                renderUI(); // Update UI after login attempt
+            }
+        }
+
+        async function handleRegister() {
+            authError = '';
+            isLoading = true;
+            renderUI(); // Show loading state
+            try {
+                await createUserWithEmailAndPassword(auth, email, password);
+                console.log("Registration successful!");
+                authError = "Registration successful! You can now log in.";
+                currentView = 'login'; // Switch to login view
+            } catch (error) {
+                console.error("Registration error:", error);
+                let errorMessage = error.message;
+                if (error.code === 'auth/invalid-email') {
+                    errorMessage = 'Invalid email address format.';
+                } else if (error.code === 'auth/email-already-in-use') {
+                    errorMessage = 'This email is already registered. Please login or use a different email.';
+                } else if (error.code === 'auth/weak-password') {
+                    errorMessage = 'Password is too weak. Please choose a stronger password (at least 6 characters).';
+                } else if (error.code === 'auth/network-request-failed') {
+                    errorMessage = 'Network error. Please check your internet connection.';
+                } else if (error.code === 'auth/operation-not-allowed') {
+                    errorMessage = 'Email/Password authentication is not enabled for this Firebase project. Please enable it in Firebase Console.';
+                } else {
+                    errorMessage = `Registration failed: ${error.message}`;
+                }
+                authError = errorMessage;
+            } finally {
+                isLoading = false;
+                renderUI(); // Update UI after registration attempt
+            }
+        }
+
+        async function handleLogout() {
+            isLoading = true;
+            renderUI();
+            try {
+                await signOut(auth);
+                // onAuthStateChanged will handle state updates and view change
+            } catch (error) {
+                console.error("Logout error:", error);
+                authError = "Failed to log out.";
+            } finally {
+                isLoading = false;
+                renderUI();
+            }
+        }
+
+        async function handleForgotPassword() {
+            forgotPasswordMessage = '';
+            isLoading = true;
+            renderUI();
+
+            if (!forgotPasswordEmail) {
+                forgotPasswordMessage = { text: 'Please enter your email address.', type: 'error' };
+                isLoading = false;
+                renderUI();
+                return;
+            }
+            if (!auth) {
+                forgotPasswordMessage = { text: 'Firebase Auth is not initialized.', type: 'error' };
+                isLoading = false;
+                renderUI();
+                return;
+            }
+
+            try {
+                await sendPasswordResetEmail(auth, forgotPasswordEmail);
+                forgotPasswordMessage = { text: 'Password reset email sent! Check your inbox.', type: 'success' };
+            } catch (error) {
+                console.error("Error sending password reset email:", error);
+                let errorMessage = error.message;
+                if (error.code === 'auth/user-not-found') {
+                    errorMessage = 'No user found with that email address.';
+                } else if (error.code === 'auth/invalid-email') {
+                    errorMessage = 'Invalid email address format.';
+                } else if (error.code === 'auth/network-request-failed') {
+                    errorMessage = 'Network error. Please check your internet connection.';
+                }
+                forgotPasswordMessage = { text: `Error: ${errorMessage}`, type: 'error' };
+            } finally {
+                isLoading = false;
+                renderUI();
+            }
+        }
+
+        // --- Firestore Data Functions ---
+        async function saveCareerGuidance(guidanceText) {
+            if (!db || !currentUserId || !currentProjectId) {
+                console.error("Firestore, User ID, or Project ID not available for saving.");
+                guidanceError = "Cannot save guidance: Not logged in or database not ready.";
+                renderUI();
+                return;
+            }
+
+            try {
+                const guidanceCollectionRef = collection(db, `artifacts/${currentProjectId}/users/${currentUserId}/careerGuidance`);
+                await setDoc(doc(guidanceCollectionRef), {
+                    interests: userResponses.interests,
+                    skills: userResponses.skills,
+                    goals: userResponses.goals,
+                    guidance: guidanceText,
+                    timestamp: new Date().toISOString(),
+                    userId: currentUserId
+                });
+                console.log("Career guidance saved successfully!");
+                await fetchPastGuidance(); // Refresh past guidance after saving
+            } catch (error) {
+                console.error("Error saving career guidance:", error);
+                guidanceError = "Failed to save guidance. Please try again.";
+            } finally {
+                renderUI();
+            }
+        }
+
+        async function fetchPastGuidance() {
+            if (!db || !currentUserId || !currentProjectId) {
+                console.warn("Firestore, User ID, or Project ID not available for fetching past guidance.");
+                pastGuidance = [];
+                renderUI();
+                return;
+            }
+            try {
+                const guidanceCollectionRef = collection(db, `artifacts/${currentProjectId}/users/${currentUserId}/careerGuidance`);
+                const q = query(guidanceCollectionRef);
+                const querySnapshot = await getDocs(q);
+                const guidanceList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+                guidanceList.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                pastGuidance = guidanceList;
+            } catch (error) {
+                console.error("Error fetching past guidance:", error);
+                guidanceError = "Failed to load past guidance.";
+            } finally {
+                renderUI();
+            }
+        }
+
+        async function handleDeleteGuidance(id) {
+            if (!db || !currentUserId || !currentProjectId) {
+                console.error("Firestore, User ID, or Project ID not available for deleting.");
+                guidanceError = "Cannot delete guidance: Not logged in or database not ready.";
+                renderUI();
+                return;
+            }
+            try {
+                const docRef = doc(db, `artifacts/${currentProjectId}/users/${currentUserId}/careerGuidance`, id);
+                await deleteDoc(docRef);
+                console.log("Guidance deleted successfully!");
+                showDeleteConfirmModal = false;
+                guidanceToDelete = null;
+                await fetchPastGuidance(); // Refresh list
+            } catch (error) {
+                console.error("Error deleting guidance:", error);
+                guidanceError = "Failed to delete guidance. Please try again.";
+            } finally {
+                renderUI();
+            }
+        }
+
+        // --- Conversational AI Logic ---
+        function startConversation() {
+            conversationHistory = [];
+            userResponses = { interests: '', skills: '', goals: '' };
+            currentQuestionType = 'interests';
+            careerGuidance = ''; // Clear previous guidance
+            skillPlan = ''; // Clear previous skill plan
+            guidanceError = '';
+            skillPlanError = '';
+            addAIMessage("Hello! I'm your AI Career Guide. Let's find the perfect path for you. To start, what are your main career **interests**? (e.g., Technology, Creative Arts, Healthcare)");
+            renderUI();
+        }
+
+        function restartConversation() {
+            console.log("Restarting conversation...");
+            conversationHistory = [];
+            userResponses = { interests: '', skills: '', goals: '' };
+            currentQuestionType = 'interests';
+            careerGuidance = '';
+            skillPlan = '';
+            guidanceError = '';
+            skillPlanError = '';
+            currentUserInput = '';
+            startConversation(); // Re-initiate the conversation from the beginning
+        }
+
+        async function handleSendMessage() {
+            const message = currentUserInput.trim();
+            if (!message) return;
+
+            conversationHistory.push({ role: 'user', text: message });
+            currentUserInput = ''; // Clear input field
+            isLoading = true; // Show AI typing indicator
+            renderUI();
+
+            switch (currentQuestionType) {
+                case 'interests':
+                    userResponses.interests = message;
+                    currentQuestionType = 'skills';
+                    addAIMessage("Great! Now, what are your key **skills**? (e.g., Programming, Communication, Problem-solving, Design)");
+                    isLoading = false;
+                    renderUI();
+                    break;
+                case 'skills':
+                    userResponses.skills = message;
+                    currentQuestionType = 'goals';
+                    addAIMessage("Understood. Finally, what are your primary career **goals**? (e.g., Work remotely, High impact, Financial stability, Continuous learning)");
+                    isLoading = false;
+                    renderUI();
+                    break;
+                case 'goals':
+                    userResponses.goals = message;
+                    currentQuestionType = 'finished_questions';
+                    addAIMessage("Thank you for providing that information! I'm now generating your personalized career guidance. This might take a moment...");
+                    await generateCareerGuidanceFromAI();
+                    isLoading = false;
+                    renderUI();
+                    break;
+                case 'finished_questions':
+                    addAIMessage("My primary guidance has been generated. If you have further questions, please ask, or click 'Generate Skill Development Plan' for a detailed roadmap.");
+                    isLoading = false;
+                    renderUI();
+                    break;
+                default:
+                    addAIMessage("I'm not sure how to respond to that. Let's start over if you'd like new guidance. Just type 'start over'.");
+                    isLoading = false;
+                    renderUI();
+            }
+        }
+
+        function addAIMessage(text) {
+            conversationHistory.push({ role: 'model', text: text });
+        }
+
+        // --- AI Guidance Function (using Gemini API) ---
+        async function generateCareerGuidanceFromAI() {
+            console.log("Generating career guidance from AI...");
+            guidanceError = '';
+            careerGuidance = ''; // Clear previous guidance
+
+            const prompt = `Based on the following user information, provide comprehensive career guidance, including potential career paths, industries, and general advice.
+Format your response to be easy to read and attractive, using:
+- Clear, descriptive headings for sections.
+- Bullet points for lists of suggestions or actionable items.
+- Shorter paragraphs (2-4 sentences max) for explanations.
+- Ample line breaks to separate ideas and sections.
+
+User Interests: ${userResponses.interests}
+User Skills: ${userResponses.skills}
+User Career Goals: ${userResponses.goals}
+
+Please provide at least 5 distinct career suggestions with a brief explanation for each, and then offer some general advice on career development.`;
+
+            let chatHistoryForAPI = [];
+            chatHistoryForAPI.push({ role: "user", parts: [{ text: prompt }] });
+            const payload = { contents: chatHistoryForAPI };
+            const apiKey = firebaseConfig.apiKey; // Use the API key from firebaseConfig
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(`API error: ${response.status} ${response.statusText} - ${errorData.error?.message || 'Unknown error'}`);
+                }
+
+                const result = await response.json();
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const text = result.candidates[0].content.parts[0].text;
+                    careerGuidance = text;
+                    addAIMessage("Here is your personalized career guidance:");
+                    addAIMessage(text); // Add the full guidance to chat history
+                    await saveCareerGuidance(text); // Save the generated guidance
+                } else {
+                    careerGuidance = "No guidance could be generated. Please try rephrasing your input.";
+                    guidanceError = "Failed to get a valid response from the AI model.";
+                    addAIMessage("I apologize, but I couldn't generate guidance. Please try again with different input.");
+                }
+            } catch (error) {
+                console.error("Error generating career guidance:", error);
+                guidanceError = `Failed to generate career guidance: ${error.message}. Please try again.`;
+                addAIMessage(`An error occurred: ${error.message}. Please check your API setup or try again later.`);
+            } finally {
+                isLoading = false;
+                renderUI();
+                console.log("generateCareerGuidanceFromAI finished.");
+            }
+        }
+
+        // --- AI Skill Development Plan Function (using Gemini API) ---
+        async function handleGetSkillPlan() {
+            console.log("handleGetSkillPlan called.");
+            isSkillPlanLoading = true;
+            skillPlan = '';
+            skillPlanError = '';
+            renderUI();
+
+            const currentGuidance = careerGuidance;
+            const currentSkills = userResponses.skills; // Use the skills from userResponses
+
+            if (!currentGuidance) {
+                skillPlanError = "Please generate career guidance first before requesting a skill development plan.";
+                addAIMessage("Please generate career guidance first before requesting a skill development plan.");
+                isSkillPlanLoading = false;
+                renderUI();
+                return;
+            }
+            if (!currentSkills) {
+                skillPlanError = "Please provide your current skills in the chat above to generate a relevant plan.";
+                addAIMessage("Please provide your current skills in the chat above to generate a relevant plan.");
+                isSkillPlanLoading = false;
+                renderUI();
+                return;
+            }
+
+            addAIMessage("Generating your skill development plan. This may take a moment...");
+
+            const prompt = `Based on the following career guidance and the user's current skills, create a detailed skill development plan.
+Format your response to be easy to read and attractive, using:
+- Clear, descriptive headings for sections.
+- Bullet points for lists of suggestions or actionable items.
+- Shorter paragraphs (2-4 sentences max) for explanations.
+- Ample line breaks to separate ideas and sections.
+
+Career Guidance: ${currentGuidance}
+User's Current Skills: ${currentSkills}
+
+Please make the plan practical and actionable.`;
+
+            let chatHistoryForAPI = [];
+            chatHistoryForAPI.push({ role: "user", parts: [{ text: prompt }] });
+            const payload = { contents: chatHistoryForAPI };
+            const apiKey = firebaseConfig.apiKey; // Use the API key from firebaseConfig
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(`API error: ${response.status} ${response.statusText} - ${errorData.error?.message || 'Unknown error'}`);
+                }
+
+                const result = await response.json();
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const text = result.candidates[0].content.parts[0].text;
+                    skillPlan = text;
+                    addAIMessage("Here is your personalized skill development plan:");
+                    addAIMessage(text); // Add the full plan to chat history
+                } else {
+                    skillPlan = "No skill development plan could be generated. Please try again.";
+                    skillPlanError = "Failed to get a valid response from the AI model.";
+                    addAIMessage("I apologize, but I couldn't generate a skill plan. Please try again.");
+                }
+            } catch (error) {
+                console.error("Error generating skill plan:", error);
+                skillPlanError = `Failed to generate skill development plan: ${error.message}. Please try again.`;
+                addAIMessage(`An error occurred: ${error.message}. Please check your API setup or try again later.`);
+            } finally {
+                isSkillPlanLoading = false;
+                renderUI();
+                console.log("handleGetSkillPlan finished.");
+            }
+        }
+
+        // --- Initial Setup on Window Load ---
+        window.onload = function() {
+            console.log("Window loaded, initializing Firebase.");
+            initializeFirebase();
+            // renderUI will be called by onAuthStateChanged after Firebase init
+        };
+    </script>
+</body>
+</html>
